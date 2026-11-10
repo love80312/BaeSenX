@@ -8,6 +8,7 @@ on:
     paths:
       - 'BaeSenX/**'
       - 'BaeSenX.Tests/**'
+      - 'BaeSenX.LegacyTests/**'
       - 'test/**'
       - '.github/workflows/build-win-x64.yml'
       - 'README.md'
@@ -31,153 +32,40 @@ jobs:
           New-Item -ItemType Directory -Force -Path publish | Out-Null
           msbuild BaeSenX/BaeSenX.csproj /restore /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$PWD\publish\"
 
-      - name: Build regression test runner
+      - name: Build new-format regression test runner
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path test-publish | Out-Null
           msbuild BaeSenX.Tests/BaeSenX.Tests.csproj /restore /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$PWD\test-publish\"
 
-      - name: Test real BSXX sample
+      - name: Test new-format import and export
         shell: pwsh
         run: |
           if (-not (Test-Path 'test/bsxx.dat')) {
             throw 'Required regression sample test/bsxx.dat was not found.'
           }
-          New-Item -ItemType Directory -Force -Path test-results | Out-Null
-          & "$PWD\test-publish\BaeSenX.Tests.exe" "$PWD\test\bsxx.dat" "$PWD\test-results"
+          New-Item -ItemType Directory -Force -Path test-results/new-format | Out-Null
+          & "$PWD\test-publish\BaeSenX.Tests.exe" "$PWD\test\bsxx.dat" "$PWD\test-results\new-format"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
 
-      - name: Diagnose legacy translated BSXX sample
-        continue-on-error: true
+      - name: Build legacy DAT export regression test runner
         shell: pwsh
         run: |
-          $legacyPath = 'test/cn_bsxx.dat'
-          if (-not (Test-Path $legacyPath)) {
-            Write-Host 'No test/cn_bsxx.dat found; skipping legacy compatibility probe.'
-            exit 0
+          New-Item -ItemType Directory -Force -Path legacy-test-publish | Out-Null
+          msbuild BaeSenX.LegacyTests/BaeSenX.LegacyTests.csproj /restore /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$PWD\legacy-test-publish\"
+
+      - name: Test legacy BSXScript_Tool DAT to TXT conversion
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'test/cn_bsxx.dat')) {
+            throw 'Required legacy regression sample test/cn_bsxx.dat was not found.'
           }
-
-          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $legacyPath))
-          Write-Host '========== LEGACY BSXX SAMPLE =========='
-          Write-Host ("File: {0}; size: {1} bytes" -f $legacyPath, $bytes.Length)
-          if ($bytes.Length -lt 0xA8) {
-            Write-Host 'HEADER ERROR: file is shorter than 0xA8 bytes.'
-          }
-          else {
-            $signature = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 16).TrimEnd([char]0)
-            Write-Host ("Signature: [{0}]" -f $signature)
-            Write-Host ("Header (0x00-0xA7): {0}" -f ([BitConverter]::ToString($bytes, 0, 0xA8)))
-
-            $fields = @(
-              @{ Name = 'Opcode'; Offset = 0x2C; Size = 0x30 },
-              @{ Name = 'Functions metadata'; Offset = 0x38; Size = 0x3C },
-              @{ Name = 'Functions data'; Offset = 0x40; Size = 0x44 },
-              @{ Name = 'Variable 1 metadata'; Offset = 0x48; Size = 0x4C },
-              @{ Name = 'Variable 1 data'; Offset = 0x50; Size = 0x54 },
-              @{ Name = 'Variable 2 metadata'; Offset = 0x58; Size = 0x5C },
-              @{ Name = 'Variable 2 data'; Offset = 0x60; Size = 0x64 },
-              @{ Name = 'Variable 3 metadata'; Offset = 0x68; Size = 0x6C },
-              @{ Name = 'Variable 3 data'; Offset = 0x70; Size = 0x74 },
-              @{ Name = 'Variable 4 metadata'; Offset = 0x78; Size = 0x7C },
-              @{ Name = 'Variable 4 data'; Offset = 0x80; Size = 0x84 },
-              @{ Name = 'Character metadata'; Offset = 0x88; Size = 0x8C },
-              @{ Name = 'Character data'; Offset = 0x90; Size = 0x94 },
-              @{ Name = 'Message metadata'; Offset = 0x98; Size = 0x9C },
-              @{ Name = 'Message data'; Offset = 0xA0; Size = 0xA4 }
-            )
-
-            Write-Host '--- Header offset/size fields ---'
-            foreach ($field in $fields) {
-              $offset = [BitConverter]::ToInt32($bytes, $field.Offset)
-              $size = [BitConverter]::ToInt32($bytes, $field.Size)
-              $valid = $offset -ge 0 -and $size -ge 0 -and ([long]$offset + [long]$size) -le $bytes.Length
-              Write-Host ("{0,-22} offset={1,10} (0x{1:X8}) size={2,10} (0x{2:X8}) rangeValid={3}" -f $field.Name, $offset, $size, $valid)
-            }
-
-            function Test-LegacyStringTable([string]$name, [int]$indexOffset, [int]$indexSize, [int]$blockOffset, [int]$blockSize, [byte[]]$data) {
-              Write-Host ("--- {0} string table ---" -f $name)
-              if ($indexOffset -lt 0 -or $indexSize -lt 0 -or $blockOffset -lt 0 -or $blockSize -lt 0 -or
-                  ([long]$indexOffset + $indexSize) -gt $data.Length -or
-                  ([long]$blockOffset + $blockSize) -gt $data.Length -or
-                  ($indexSize % 4) -ne 0 -or ($blockSize % 2) -ne 0) {
-                Write-Host 'Table ranges or sizes are invalid; cannot inspect index entries.'
-                return
-              }
-
-              $count = [int]($indexSize / 4)
-              $offsets = New-Object 'System.Collections.Generic.List[long]'
-              $negative = 0
-              $outside = 0
-              $descending = 0
-              $previous = -1L
-              for ($i = 0; $i -lt $count; $i++) {
-                $units = [BitConverter]::ToInt32($data, $indexOffset + ($i * 4))
-                if ($units -lt 0) {
-                  $negative++
-                  $offsets.Add(-1L)
-                  continue
-                }
-                $relative = [long]$units * 2L
-                $offsets.Add($relative)
-                if ($relative -ge $blockSize) { $outside++ }
-                if ($previous -ge 0 -and $relative -lt $previous) { $descending++ }
-                $previous = $relative
-              }
-
-              $first = @($offsets | Select-Object -First 12)
-              Write-Host ("Entries={0}; blockSize={1}; negativeOffsets={2}; outOfBlockOffsets={3}; descendingOffsets={4}" -f $count, $blockSize, $negative, $outside, $descending)
-              Write-Host ("First 12 relative byte offsets: {0}" -f ($first -join ', '))
-
-              $distinct = @($offsets | Where-Object { $_ -ge 0 -and $_ -lt $blockSize } | Sort-Object -Unique)
-              $missingTerminators = 0
-              $sampleMissing = @()
-              for ($i = 0; $i -lt $distinct.Count; $i++) {
-                $start = [long]$distinct[$i]
-                $limit = if ($i + 1 -lt $distinct.Count) { [long]$distinct[$i + 1] } else { [long]$blockSize }
-                $found = $false
-                for ($p = $start; $p + 1 -lt $limit; $p += 2) {
-                  $absolute = [long]$blockOffset + $p
-                  if ($data[$absolute] -eq 0 -and $data[$absolute + 1] -eq 0) {
-                    $found = $true
-                    break
-                  }
-                }
-                if (-not $found) {
-                  $missingTerminators++
-                  if ($sampleMissing.Count -lt 8) { $sampleMissing += $start }
-                }
-              }
-              Write-Host ("DistinctOffsets={0}; missingUtf16Terminators={1}; sampleMissingStarts={2}" -f $distinct.Count, $missingTerminators, ($sampleMissing -join ', '))
-            }
-
-            $charIndexOffset = [BitConverter]::ToInt32($bytes, 0x88)
-            $charIndexSize = [BitConverter]::ToInt32($bytes, 0x8C)
-            $charBlockOffset = [BitConverter]::ToInt32($bytes, 0x90)
-            $charBlockSize = [BitConverter]::ToInt32($bytes, 0x94)
-            $msgIndexOffset = [BitConverter]::ToInt32($bytes, 0x98)
-            $msgIndexSize = [BitConverter]::ToInt32($bytes, 0x9C)
-            $msgBlockOffset = [BitConverter]::ToInt32($bytes, 0xA0)
-            $msgBlockSize = [BitConverter]::ToInt32($bytes, 0xA4)
-
-            Test-LegacyStringTable 'Character' $charIndexOffset $charIndexSize $charBlockOffset $charBlockSize $bytes
-            Test-LegacyStringTable 'Message' $msgIndexOffset $msgIndexSize $msgBlockOffset $msgBlockSize $bytes
-
-            Write-Host '--- Section order ---'
-            Write-Host ("Character index end <= character block: {0}" -f ([long]$charIndexOffset + $charIndexSize -le $charBlockOffset))
-            Write-Host ("Character block end <= message index: {0}" -f ([long]$charBlockOffset + $charBlockSize -le $msgIndexOffset))
-            Write-Host ("Message index end <= message block: {0}" -f ([long]$msgIndexOffset + $msgIndexSize -le $msgBlockOffset))
-            Write-Host ("Message block end <= file size: {0}" -f ([long]$msgBlockOffset + $msgBlockSize -le $bytes.Length))
-          }
-
-          Write-Host '--- Run BaeSenX parser against legacy file ---'
-          New-Item -ItemType Directory -Force -Path test-results/legacy-probe | Out-Null
-          & "$PWD\test-publish\BaeSenX.Tests.exe" "$PWD\$legacyPath" "$PWD\test-results\legacy-probe"
-          $legacyExitCode = $LASTEXITCODE
-          Write-Host ("Legacy sample test-runner exit code: {0}" -f $legacyExitCode)
-          if ($legacyExitCode -ne 0) {
-            Write-Warning 'The legacy sample is not yet compatible. The diagnostic output above is intentionally non-fatal so the normal Windows build artifact can still be uploaded.'
+          New-Item -ItemType Directory -Force -Path test-results/legacy-format | Out-Null
+          & "$PWD\legacy-test-publish\BaeSenX.LegacyTests.exe" "$PWD\test\cn_bsxx.dat" "$PWD\test-results\legacy-format"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
           }
 
       - name: Upload Windows x64 build
