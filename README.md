@@ -1,6 +1,6 @@
 # BaeSenX — Bishop 腳本中文化工具
 
-BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字中文化為目標，提供 Windows 10 x64 GUI。
+BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字中文化為目標，提供 Windows 10 x64 WPF GUI。
 
 ## 第一版功能
 
@@ -13,7 +13,7 @@ BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字
 - 匯入前核對原文及索引，避免把翻譯套用到不同版本的腳本。
 - 匯入後重新讀取輸出檔，逐筆驗證字串，並確認 Opcode 區段與原始檔逐位元組相同。
 - 輸出為另一個檔案，不會覆蓋原始 `bsxx.dat`。
-- 不需要第三方執行環境或其他 NuGet 套件；建置時會還原 .NET Framework 4.8 參考組件。
+- 不需要第三方執行環境；建置時會還原 .NET Framework 4.8 參考組件。
 
 ## 使用方式
 
@@ -25,7 +25,8 @@ BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字
 6. 保留索引標記，例如 `◆B0000123◆`，只修改標記後面的文字。
 7. 儲存文字檔後，回到 BaeSenX 按「匯入翻譯並產生新腳本」。
 8. 選取翻譯文字檔，並將結果另存為新的 `.dat` 檔。
-9. 備份遊戲原始檔後，再將新檔放入遊戲副本測試。不要直接覆蓋唯一的原始檔。
+9. 先備份遊戲原始檔，並在遊戲副本中測試。將翻譯後的檔案放回遊戲時，請使用遊戲原本要求的檔名 `bsxx.dat`；不要把 `bsxx_zh.dat` 直接留在遊戲目錄並期待引擎自動載入。
+10. 確認遊戲能正常啟動、顯示文字及讀取存檔後，才考慮套用到正式遊戲目錄。
 
 ## 翻譯文字格式
 
@@ -48,17 +49,35 @@ BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字
 - `◆` 翻譯行會寫入遊戲。未修改的翻譯行會保留原文；刪除整筆 `◆` 行則表示該索引不匯入。
 - 將 `◆` 標記後的內容清空，代表寫入空字串。
 - 本工具格式使用 `\n`、`\r`、`\t`、`\\`、`\uXXXX` 表示換行、定位字元、反斜線及控制字元。
-- 可匯入 `BSXScript_Tool` 的標記格式；其舊格式沒有跳脫序列，因此反斜線會按原樣處理。
+- 可匯入 `BSXScript_Tool` 的標記格式；其舊格式沒有跳脫序列，因此反斜線會按原樣處理。舊格式本身不適合含實際換行的翻譯字串，這類內容請使用 BaeSenX 匯出格式。
 
 ## 安全與相容性
 
 - 本版本只修改角色名稱及訊息字串表，不修改 Opcode、函式表、變數表或指令參數。
 - 重建時保留原有 Opcode 區段，並在輸出前逐位元組比對。
 - 重建後會重新開啟輸出檔，確認版本、字串索引及全部字串均可正確讀取。
-- 原始 `bsxx.dat` 不會被覆蓋。
+- 原始 `bsxx.dat` 不會被覆蓋；輸出檔不可指定為來源檔本身。
 - 字串以 UTF-16LE 寫入；遊戲能否正確顯示繁體中文字，仍取決於遊戲字型及字形資源是否包含所需字元。
 - 若某款遊戲的區塊排列不同、欄位不合理或檔案損毀，本工具會中止處理，不會猜測或自動修復。
 - 雖然格式標頭辨識 3.0～3.3，但尚未對所有 Bishop 遊戲逐款完成實機相容性測試。請先用遊戲副本驗證。
+
+## 回歸測試
+
+GitHub Actions 會使用儲存庫內的 `test/bsxx.dat`（真實 BSXX 樣本）執行回歸測試。測試程式位於 `BaeSenX.Tests/`，與 GUI 分開編譯，不會被包進一般使用者下載的程式。
+
+目前測試涵蓋：
+
+- 讀取樣本並檢查版本、角色名稱數量及訊息／選項數量。
+- 匯出完整翻譯檔，再不修改內容匯入，確認字串數量不變。
+- 確認 Opcode 區段逐位元組不變。
+- 確認字串表之前的原始資料及訊息字串區之後的尾端資料保留。
+- 匯入繁體中文、日文、多行文字、定位字元、標記符號及補充平面 Unicode 字元，再重新匯出比對。
+- 測試 `BSXScript_Tool` 舊版標記格式（選取可用的單行紀錄）。
+- 錯誤原文及 NUL 字元必須遭拒絕，且不得產生輸出檔。
+- 不允許輸出覆蓋來源 `bsxx.dat`，並檢查來源樣本 SHA-256 未改變。
+- 測試重複產生既有輸出檔時的安全替換流程。
+
+若回歸測試失敗，Actions 會停止，不會上傳新的正式建置 Artifact。`test/bsxx.dat` 只用於測試，不會打包進使用者版本。
 
 ## Windows x64 建置
 
@@ -67,13 +86,16 @@ BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字
 - 目標架構：x64。
 - Windows 10 22H2 通常已包含 .NET Framework 4.8；若系統元件遭移除或停用，需先透過 Windows 功能修復／啟用。
 
-GitHub Actions 會在 Windows 建置環境產生 `BaeSenX-Win10-x64` Artifact：
+GitHub Actions 會在 Windows 建置環境先編譯 GUI，再編譯並執行回歸測試。只有全部成功後，才會產生 `BaeSenX-Win10-x64` Artifact：
 
 1. 開啟 GitHub 專案的 **Actions**。
 2. 選擇 **Build BaeSenX Windows x64**。
-3. 按 **Run workflow**，或由更新 `main` 分支的提交自動觸發。
-4. 成功後下載 `BaeSenX-Win10-x64` Artifact。
-5. 解壓縮並執行 `BaeSenX.exe`。
+3. 按 **Run workflow**，或將變更推送至 `t_wpf` 分支（修改 `BaeSenX/`、`BaeSenX.Tests/`、`test/`、workflow 或 README 時會自動觸發）。
+4. 確認 `Build regression test runner` 與 `Test real BSXX sample` 均成功。
+5. 成功後下載 `BaeSenX-Win10-x64` Artifact。
+6. 解壓縮並執行 `BaeSenX.exe`。
+
+Actions 使用 Node.js 24 相容版本：`actions/checkout@v7`、`microsoft/setup-msbuild@v3`、`actions/upload-artifact@v7`。
 
 ## 目前不包含
 

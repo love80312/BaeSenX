@@ -1,0 +1,23 @@
+BaeSenX t_wpf 修正內容
+
+1. 建置流程
+- checkout 更新至 actions/checkout@v7。
+- setup-msbuild 更新至 microsoft/setup-msbuild@v3。
+- upload-artifact 更新至 actions/upload-artifact@v7。
+- 保留 .NET Framework 4.8、WPF、x64 目標。
+- 加入測試專案建置與真實 BSXX 樣本執行。
+
+2. 編譯警告
+- Instruction.Type 初始化為 string.Empty，修正 CS8618。
+
+3. 自動回歸測試
+- 使用 test/bsxx.dat 實際檔案。
+- 檢查 BSXX 版本與字串表。
+- 匯出後不修改匯入。
+- 檢查 Opcode、字串表之前的資料及訊息表之後的尾端資料。
+- 測試繁體中文、日文、換行、Tab、標記符號及 emoji。
+- 測試 BSXScript_Tool 舊版標記文字格式。
+- 測試錯誤原文、NUL 字元及覆蓋來源檔的拒絕行為。
+- 檢查來源測試檔 SHA-256 不變。
+
+注意：目前執行環境沒有 Windows MSBuild/.NET Framework 4.8，尚未在此環境實際編譯或執行測試。請以 GitHub Actions 的測試結果作為本次程式碼驗證依據。
