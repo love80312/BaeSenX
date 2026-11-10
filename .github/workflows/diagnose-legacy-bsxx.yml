@@ -1,0 +1,510 @@
+name: Diagnose Legacy BSXX Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - t_wpf
+    paths:
+      - 'test/bsxx.dat'
+      - 'test/cn_bsxx.dat'
+      - '.github/workflows/diagnose-legacy-bsxx.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Diagnose original and translated BSXX files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $originalPath = 'test/bsxx.dat'
+          $legacyPath = 'test/cn_bsxx.dat'
+
+          foreach ($path in @($originalPath, $legacyPath)) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Required file not found: $path"
+            }
+          }
+
+          function Read-Int32At {
+            param(
+              [byte[]]$Data,
+              [int]$Offset
+            )
+
+            if ($Offset -lt 0 -or $Offset -gt ($Data.Length - 4)) {
+              throw "Int32 read outside file: offset=$Offset"
+            }
+
+            return [BitConverter]::ToInt32($Data, $Offset)
+          }
+
+          function Read-BsxxHeader {
+            param(
+              [string]$Path
+            )
+
+            $data = [System.IO.File]::ReadAllBytes((Resolve-Path $Path))
+
+            if ($data.Length -lt 0xA8) {
+              throw "$Path is shorter than the BSXX header."
+            }
+
+            $signature = [System.Text.Encoding]::ASCII.GetString(
+              $data, 0, 16
+            ).TrimEnd([char]0)
+
+            if ($signature -notmatch '^BSXScript 3\.[0-3]$') {
+              throw "$Path has an unsupported signature: $signature"
+            }
+
+            $fields = @(
+              @{ Name = 'Opcode'; Offset = 0x2C; Size = 0x30 },
+              @{ Name = 'Functions metadata'; Offset = 0x38; Size = 0x3C },
+              @{ Name = 'Functions data'; Offset = 0x40; Size = 0x44 },
+              @{ Name = 'Variable 1 metadata'; Offset = 0x48; Size = 0x4C },
+              @{ Name = 'Variable 1 data'; Offset = 0x50; Size = 0x54 },
+              @{ Name = 'Variable 2 metadata'; Offset = 0x58; Size = 0x5C },
+              @{ Name = 'Variable 2 data'; Offset = 0x60; Size = 0x64 },
+              @{ Name = 'Variable 3 metadata'; Offset = 0x68; Size = 0x6C },
+              @{ Name = 'Variable 3 data'; Offset = 0x70; Size = 0x74 },
+              @{ Name = 'Variable 4 metadata'; Offset = 0x78; Size = 0x7C },
+              @{ Name = 'Variable 4 data'; Offset = 0x80; Size = 0x84 },
+              @{ Name = 'Character metadata'; Offset = 0x88; Size = 0x8C },
+              @{ Name = 'Character data'; Offset = 0x90; Size = 0x94 },
+              @{ Name = 'Message metadata'; Offset = 0x98; Size = 0x9C },
+              @{ Name = 'Message data'; Offset = 0xA0; Size = 0xA4 }
+            )
+
+            $sections = foreach ($field in $fields) {
+              $offset = Read-Int32At $data $field.Offset
+              $size = Read-Int32At $data $field.Size
+
+              [pscustomobject]@{
+                Name = $field.Name
+                Offset = $offset
+                Size = $size
+                End = [long]$offset + [long]$size
+                InFile = (
+                  $offset -ge 0 -and
+                  $size -ge 0 -and
+                  ([long]$offset + [long]$size) -le $data.Length
+                )
+              }
+            }
+
+            return [pscustomobject]@{
+              Path = $Path
+              Data = $data
+              Signature = $signature
+              Length = $data.Length
+              Sections = @($sections)
+            }
+          }
+
+          function Compare-IndexTables {
+            param(
+              $Original,
+              $Legacy,
+              [string]$Name,
+              [int]$OffsetField,
+              [int]$SizeField
+            )
+
+            Write-Host ""
+            Write-Host "========== $Name INDEX COMPARISON =========="
+
+            $originalOffset = Read-Int32At $Original.Data $OffsetField
+            $originalSize = Read-Int32At $Original.Data $SizeField
+            $legacyOffset = Read-Int32At $Legacy.Data $OffsetField
+            $legacySize = Read-Int32At $Legacy.Data $SizeField
+
+            Write-Host (
+              "Original: offset={0} size={1}" -f
+              $originalOffset, $originalSize
+            )
+            Write-Host (
+              "Legacy:   offset={0} size={1}" -f
+              $legacyOffset, $legacySize
+            )
+
+            $originalValid = (
+              $originalOffset -ge 0 -and
+              $originalSize -ge 0 -and
+              ([long]$originalOffset + $originalSize) -le $Original.Length -and
+              ($originalSize % 4) -eq 0
+            )
+
+            $legacyValid = (
+              $legacyOffset -ge 0 -and
+              $legacySize -ge 0 -and
+              ([long]$legacyOffset + $legacySize) -le $Legacy.Length -and
+              ($legacySize % 4) -eq 0
+            )
+
+            if (-not $originalValid -or -not $legacyValid) {
+              Write-Host 'Cannot compare: one or both index tables are invalid.'
+              return
+            }
+
+            $originalCount = [int]($originalSize / 4)
+            $legacyCount = [int]($legacySize / 4)
+
+            Write-Host "Original entries: $originalCount"
+            Write-Host "Legacy entries:   $legacyCount"
+
+            if ($originalCount -ne $legacyCount) {
+              Write-Host 'Entry counts differ.'
+              return
+            }
+
+            $different = 0
+            $samples = @()
+
+            for ($i = 0; $i -lt $originalCount; $i++) {
+              $a = Read-Int32At $Original.Data ($originalOffset + $i * 4)
+              $b = Read-Int32At $Legacy.Data ($legacyOffset + $i * 4)
+
+              if ($a -ne $b) {
+                $different++
+
+                if ($samples.Count -lt 12) {
+                  $samples += (
+                    "index={0} original={1} legacy={2}" -f $i, $a, $b
+                  )
+                }
+              }
+            }
+
+            Write-Host "Different entries: $different / $originalCount"
+
+            foreach ($sample in $samples) {
+              Write-Host "  $sample"
+            }
+
+            if ($different -eq 0) {
+              Write-Host 'All index values are identical.'
+            }
+          }
+
+          function Diagnose-MessageTable {
+            param(
+              $File
+            )
+
+            Write-Host ""
+            Write-Host '========== MESSAGE TABLE DEEP DIAGNOSTIC =========='
+            Write-Host "File: $($File.Path)"
+            Write-Host "File size: $($File.Length) bytes"
+
+            $data = $File.Data
+
+            $indexOffset = Read-Int32At $data 0x98
+            $indexSize = Read-Int32At $data 0x9C
+            $blockOffset = Read-Int32At $data 0xA0
+            $declaredBlockSize = Read-Int32At $data 0xA4
+
+            Write-Host "Index offset: $indexOffset (0x$('{0:X}' -f $indexOffset))"
+            Write-Host "Index size: $indexSize"
+            Write-Host "Message block offset: $blockOffset (0x$('{0:X}' -f $blockOffset))"
+            Write-Host "Declared message block size: $declaredBlockSize"
+            Write-Host "Declared block end: $([long]$blockOffset + $declaredBlockSize)"
+            Write-Host "Actual EOF: $($data.Length)"
+
+            $available = [long]$data.Length - $blockOffset
+
+            Write-Host "Physically available bytes from block start: $available"
+            Write-Host "Declared block exceeds EOF: $([long]$blockOffset + $declaredBlockSize -gt $data.Length)"
+
+            if (
+              $indexOffset -lt 0 -or
+              $indexSize -lt 0 -or
+              ([long]$indexOffset + $indexSize) -gt $data.Length -or
+              ($indexSize % 4) -ne 0
+            ) {
+              Write-Host 'MESSAGE INDEX TABLE INVALID: cannot continue.'
+              return
+            }
+
+            if ($blockOffset -lt 0 -or $blockOffset -ge $data.Length) {
+              Write-Host 'MESSAGE BLOCK START INVALID: cannot continue.'
+              return
+            }
+
+            if ($declaredBlockSize -lt 0) {
+              Write-Host 'MESSAGE BLOCK SIZE IS NEGATIVE.'
+              return
+            }
+
+            $physicalSize = [long][Math]::Min(
+              [long]$declaredBlockSize,
+              [long]$available
+            )
+
+            Write-Host "Physical scan boundary: $physicalSize bytes"
+            Write-Host "Index entries: $([int]($indexSize / 4))"
+
+            $count = [int]($indexSize / 4)
+            $rows = New-Object 'System.Collections.Generic.List[object]'
+            $negative = 0
+            $outsideDeclared = 0
+            $outsidePhysical = 0
+            $descending = 0
+            $previous = -1L
+
+            for ($i = 0; $i -lt $count; $i++) {
+              $units = Read-Int32At $data ($indexOffset + $i * 4)
+              $relative = [long]$units * 2L
+
+              if ($units -lt 0) {
+                $negative++
+              }
+              elseif ($relative -ge $declaredBlockSize) {
+                $outsideDeclared++
+              }
+
+              if ($units -ge 0 -and $relative -ge $physicalSize) {
+                $outsidePhysical++
+              }
+
+              if ($previous -ge 0 -and $relative -lt $previous) {
+                $descending++
+              }
+
+              if ($units -ge 0) {
+                $previous = $relative
+              }
+
+              $rows.Add([pscustomobject]@{
+                Index = $i
+                Units = $units
+                Relative = $relative
+                PhysicalValid = (
+                  $units -ge 0 -and
+                  $relative -lt $physicalSize
+                )
+              })
+            }
+
+            Write-Host ""
+            Write-Host '--- Index statistics ---'
+            Write-Host "Negative offsets: $negative"
+            Write-Host "Offsets outside declared block: $outsideDeclared"
+            Write-Host "Offsets outside physical data: $outsidePhysical"
+            Write-Host "Descending offsets in original index order: $descending"
+
+            $invalidRows = @(
+              $rows |
+                Where-Object { -not $_.PhysicalValid } |
+                Select-Object -First 20
+            )
+
+            if ($invalidRows.Count -gt 0) {
+              Write-Host 'First invalid index entries:'
+
+              foreach ($row in $invalidRows) {
+                Write-Host (
+                  "  index={0} units={1} relativeBytes={2}" -f
+                  $row.Index, $row.Units, $row.Relative
+                )
+              }
+            }
+
+            $validRows = @(
+              $rows | Where-Object { $_.PhysicalValid }
+            )
+
+            $distinctOffsets = @(
+              $validRows |
+                ForEach-Object { $_.Relative } |
+                Sort-Object -Unique
+            )
+
+            Write-Host ""
+            Write-Host '--- Offset statistics ---'
+            Write-Host "Valid entries: $($validRows.Count)"
+            Write-Host "Distinct valid offsets: $($distinctOffsets.Count)"
+
+            if ($distinctOffsets.Count -gt 0) {
+              Write-Host "Minimum relative offset: $($distinctOffsets[0])"
+              Write-Host "Maximum relative offset: $($distinctOffsets[-1])"
+              Write-Host (
+                "First 20 offsets: {0}" -f
+                (($distinctOffsets | Select-Object -First 20) -join ', ')
+              )
+              Write-Host (
+                "Last 20 offsets: {0}" -f
+                (($distinctOffsets | Select-Object -Last 20) -join ', ')
+              )
+            }
+
+            Write-Host ""
+            Write-Host '--- UTF-16LE terminator and decoding scan ---'
+
+            $strictUtf16 = [System.Text.UnicodeEncoding]::new(
+              $false, $false, $true
+            )
+
+            $missingTerminator = 0
+            $invalidUtf16 = 0
+            $emptyStrings = 0
+            $terminatorSamples = @()
+            $decodeSamples = @()
+
+            for ($i = 0; $i -lt $distinctOffsets.Count; $i++) {
+              $start = [long]$distinctOffsets[$i]
+
+              if ($i + 1 -lt $distinctOffsets.Count) {
+                $limit = [long]$distinctOffsets[$i + 1]
+              }
+              else {
+                $limit = $physicalSize
+              }
+
+              $terminator = -1L
+
+              for (
+                $p = $start;
+                ($p + 1) -lt $limit;
+                $p += 2
+              ) {
+                $absolute = [long]$blockOffset + $p
+
+                if (
+                  $data[$absolute] -eq 0 -and
+                  $data[$absolute + 1] -eq 0
+                ) {
+                  $terminator = $p
+                  break
+                }
+              }
+
+              if ($terminator -lt 0) {
+                $missingTerminator++
+
+                if ($terminatorSamples.Count -lt 12) {
+                  $terminatorSamples += $start
+                }
+
+                continue
+              }
+
+              $byteLength = [int]($terminator - $start)
+
+              if ($byteLength -eq 0) {
+                $emptyStrings++
+              }
+
+              try {
+                $absoluteStart = [int]($blockOffset + $start)
+
+                [void]$strictUtf16.GetString(
+                  $data,
+                  $absoluteStart,
+                  $byteLength
+                )
+              }
+              catch {
+                $invalidUtf16++
+
+                if ($decodeSamples.Count -lt 12) {
+                  $decodeSamples += $start
+                }
+              }
+            }
+
+            Write-Host "Missing UTF-16LE terminators: $missingTerminator"
+            Write-Host "Invalid UTF-16LE strings: $invalidUtf16"
+            Write-Host "Empty strings: $emptyStrings"
+            Write-Host "Missing terminator sample offsets: $($terminatorSamples -join ', ')"
+            Write-Host "Invalid UTF-16 sample offsets: $($decodeSamples -join ', ')"
+
+            Write-Host ""
+            Write-Host '--- Last 128 bytes of physical file ---'
+
+            $tailStart = [Math]::Max(0, $data.Length - 128)
+            $tailLength = $data.Length - $tailStart
+
+            Write-Host (
+              [BitConverter]::ToString($data, $tailStart, $tailLength)
+            )
+
+            Write-Host ""
+            Write-Host '--- Last 128 bytes of declared message block, if available ---'
+
+            $blockTailStart = [long]$blockOffset + $physicalSize - 128
+            $blockTailStart = [Math]::Max([long]$blockOffset, $blockTailStart)
+
+            $blockTailLength = [int](
+              [long]$blockOffset + $physicalSize - $blockTailStart
+            )
+
+            if ($blockTailLength -gt 0) {
+              Write-Host (
+                [BitConverter]::ToString(
+                  $data,
+                  [int]$blockTailStart,
+                  $blockTailLength
+                )
+              )
+            }
+          }
+
+          $original = Read-BsxxHeader $originalPath
+          $legacy = Read-BsxxHeader $legacyPath
+
+          foreach ($file in @($original, $legacy)) {
+            Write-Host ""
+            Write-Host '=============================================='
+            Write-Host "FILE: $($file.Path)"
+            Write-Host "Signature: $($file.Signature)"
+            Write-Host "Size: $($file.Length) bytes"
+
+            foreach ($section in $file.Sections) {
+              Write-Host (
+                "{0,-22} offset={1,10} (0x{1:X8}) size={2,10} (0x{2:X8}) end={3,10} valid={4}" -f
+                $section.Name,
+                $section.Offset,
+                $section.Size,
+                $section.End,
+                $section.InFile
+              )
+            }
+          }
+
+          Write-Host ""
+          Write-Host '========== HEADER COMPARISON =========='
+
+          foreach ($i in 0..($original.Sections.Count - 1)) {
+            $a = $original.Sections[$i]
+            $b = $legacy.Sections[$i]
+
+            if ($a.Offset -ne $b.Offset -or $a.Size -ne $b.Size) {
+              Write-Host (
+                "{0}: original=({1},{2}) legacy=({3},{4})" -f
+                $a.Name,
+                $a.Offset,
+                $a.Size,
+                $b.Offset,
+                $b.Size
+              )
+            }
+          }
+
+          Compare-IndexTables $original $legacy 'Character' 0x88 0x8C
+          Compare-IndexTables $original $legacy 'Message' 0x98 0x9C
+
+          Diagnose-MessageTable $original
+          Diagnose-MessageTable $legacy
+
+          Write-Host ""
+          Write-Host '========== DIAGNOSTIC COMPLETED =========='
