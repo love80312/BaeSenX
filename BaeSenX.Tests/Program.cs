@@ -192,7 +192,11 @@ internal static class Program
 
     private static void VerifyBinaryPreservation(byte[] original, byte[] rebuilt)
     {
-        Assert(rebuilt.Length >= 0xA8, "rebuilt file contains complete BSXX header");
+        const int headerSize = 0xA8;
+        const int tableMetadataStart = 0x88;
+        const int tableMetadataEnd = 0xA8;
+
+        Assert(rebuilt.Length >= headerSize, "rebuilt file contains complete BSXX header");
         Assert(ReadInt32(rebuilt, 0x2C) == ReadInt32(original, 0x2C),
             "Opcode offset remains unchanged");
         Assert(ReadInt32(rebuilt, 0x30) == ReadInt32(original, 0x30),
@@ -206,25 +210,69 @@ internal static class Program
                 Slice(rebuilt, opcodeOffset, opcodeSize)),
             "Opcode region is byte-identical");
 
+        // BuildTranslated intentionally rewrites the eight string-table metadata
+        // fields at 0x88-0xA7. Everything outside this metadata area and the
+        // rebuilt string-table region must remain byte-identical.
         int originalCharacterIndexOffset = ReadInt32(original, 0x88);
         int rebuiltCharacterIndexOffset = ReadInt32(rebuilt, 0x88);
         Assert(originalCharacterIndexOffset == rebuiltCharacterIndexOffset,
-            "data before the character index table retains its original boundary");
-        Assert(Slice(original, 0, originalCharacterIndexOffset).SequenceEqual(
-                Slice(rebuilt, 0, rebuiltCharacterIndexOffset)),
-            "all data before the character index table is byte-identical");
+            "character index table keeps its original starting boundary");
+        Assert(Slice(original, 0, tableMetadataStart).SequenceEqual(
+                Slice(rebuilt, 0, tableMetadataStart)),
+            "header bytes before string-table metadata are byte-identical");
+
+        Assert(originalCharacterIndexOffset >= headerSize &&
+               originalCharacterIndexOffset <= original.Length &&
+               rebuiltCharacterIndexOffset <= rebuilt.Length,
+            "character index table starts within the file after the header");
+        int prefixLength = originalCharacterIndexOffset - tableMetadataEnd;
+        Assert(prefixLength >= 0, "pre-table data range does not overlap the header metadata");
+        Assert(Slice(original, tableMetadataEnd, prefixLength).SequenceEqual(
+                Slice(rebuilt, tableMetadataEnd, prefixLength)),
+            "non-metadata data before the character index table is byte-identical");
+
+        int characterIndexOffset = ReadInt32(rebuilt, 0x88);
+        int characterIndexSize = ReadInt32(rebuilt, 0x8C);
+        int characterBlockOffset = ReadInt32(rebuilt, 0x90);
+        int characterBlockSize = ReadInt32(rebuilt, 0x94);
+        int messageIndexOffset = ReadInt32(rebuilt, 0x98);
+        int messageIndexSize = ReadInt32(rebuilt, 0x9C);
+        int messageBlockOffset = ReadInt32(rebuilt, 0xA0);
+        int messageBlockSize = ReadInt32(rebuilt, 0xA4);
+
+        Assert(characterIndexSize == ReadInt32(original, 0x8C),
+            "character index entry count and table size are preserved");
+        Assert(messageIndexSize == ReadInt32(original, 0x9C),
+            "message index entry count and table size are preserved");
+        Assert(characterIndexSize >= 0 && characterIndexSize % sizeof(int) == 0,
+            "character index table size is valid");
+        Assert(messageIndexSize >= 0 && messageIndexSize % sizeof(int) == 0,
+            "message index table size is valid");
+        Assert(characterBlockSize >= 0 && characterBlockSize % 2 == 0,
+            "character string block size is valid UTF-16LE length");
+        Assert(messageBlockSize >= 0 && messageBlockSize % 2 == 0,
+            "message string block size is valid UTF-16LE length");
+
+        AssertRange(rebuilt, characterIndexOffset, characterIndexSize, "rebuilt character index table");
+        AssertRange(rebuilt, characterBlockOffset, characterBlockSize, "rebuilt character string block");
+        AssertRange(rebuilt, messageIndexOffset, messageIndexSize, "rebuilt message index table");
+        AssertRange(rebuilt, messageBlockOffset, messageBlockSize, "rebuilt message string block");
+
+        Assert((long)characterIndexOffset + characterIndexSize <= characterBlockOffset,
+            "character index table ends before the character string block");
+        Assert((long)characterBlockOffset + characterBlockSize <= messageIndexOffset,
+            "character string block ends before the message index table");
+        Assert((long)messageIndexOffset + messageIndexSize <= messageBlockOffset,
+            "message index table ends before the message string block");
 
         int originalTailOffset = checked(ReadInt32(original, 0xA0) + ReadInt32(original, 0xA4));
-        int rebuiltTailOffset = checked(ReadInt32(rebuilt, 0xA0) + ReadInt32(rebuilt, 0xA4));
+        int rebuiltTailOffset = checked(messageBlockOffset + messageBlockSize);
         AssertRange(original, originalTailOffset, original.Length - originalTailOffset, "original trailing data");
         AssertRange(rebuilt, rebuiltTailOffset, rebuilt.Length - rebuiltTailOffset, "rebuilt trailing data");
         Assert(Slice(original, originalTailOffset, original.Length - originalTailOffset).SequenceEqual(
                 Slice(rebuilt, rebuiltTailOffset, rebuilt.Length - rebuiltTailOffset)),
             "data after the message string block is byte-identical");
 
-        int characterBlockOffset = ReadInt32(rebuilt, 0x90);
-        int messageIndexOffset = ReadInt32(rebuilt, 0x98);
-        int messageBlockOffset = ReadInt32(rebuilt, 0xA0);
         Assert(characterBlockOffset % 16 == 0, "character string block is 16-byte aligned");
         Assert(messageIndexOffset % 16 == 0, "message index table is 16-byte aligned");
         Assert(messageBlockOffset % 16 == 0, "message string block is 16-byte aligned");
