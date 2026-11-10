@@ -2,10 +2,12 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="BaeSenX｜Bishop 腳本中文化工具"
-        Width="820" Height="620"
-        MinWidth="720" MinHeight="540"
+        Width="1000" Height="850"
+        MinWidth="860" MinHeight="700"
         WindowStartupLocation="CenterScreen"
-        Background="#FFF5F6F8">
+        Background="#FFF5F6F8"
+        FontFamily="Microsoft JhengHei UI"
+        FontSize="14">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -16,14 +18,18 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Text="BaeSenX" FontSize="26" FontWeight="SemiBold" Foreground="#FF202938"/>
-            <TextBlock Text="Bishop BSXScript 3.0～3.3｜文字匯出、翻譯匯入與安全重建"
-                       Margin="0,4,0,0" FontSize="13" Foreground="#FF536273"/>
+            <TextBlock Text="BaeSenX" FontSize="28" FontWeight="SemiBold" Foreground="#FF202938"/>
+            <TextBlock Text="Bishop BSXScript 3.0～3.3｜舊版 DAT 轉換與新版翻譯作業分開處理"
+                       Margin="0,5,0,0" FontSize="15" Foreground="#FF536273" TextWrapping="Wrap"/>
         </StackPanel>
 
-        <GroupBox Grid.Row="1" Header="來源腳本" Padding="12" Margin="0,0,0,12">
+        <GroupBox Grid.Row="1"
+                  Header="① 舊版格式轉換｜BSXScript_Tool DAT → TXT（只讀匯出）"
+                  FontSize="16" FontWeight="SemiBold"
+                  Padding="14" Margin="0,0,0,14">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
@@ -31,53 +37,96 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="ScriptPathTextBox" Grid.Row="0" Grid.Column="0"
-                         Height="32" Padding="7,5" VerticalContentAlignment="Center"
+
+                <TextBox x:Name="LegacyDatPathTextBox" Grid.Row="0" Grid.Column="0"
+                         Height="38" Padding="9,6" FontSize="15"
+                         VerticalContentAlignment="Center"
                          IsReadOnly="True" Background="White"/>
-                <Button x:Name="BrowseScriptButton" Grid.Row="0" Grid.Column="1"
-                        Content="選擇 bsxx.dat" Width="132" Height="32" Margin="10,0,0,0"
-                        Click="BrowseScriptButton_Click"/>
-                <TextBlock x:Name="ScriptInfoTextBlock" Grid.Row="1" Grid.ColumnSpan="2"
-                           Margin="2,9,0,0" Text="尚未選擇腳本。支援 BSXScript 3.0～3.3。"
-                           Foreground="#FF536273" TextWrapping="Wrap"/>
+                <Button x:Name="BrowseLegacyDatButton" Grid.Row="0" Grid.Column="1"
+                        Content="選擇舊版 DAT" Width="160" Height="38" Margin="12,0,0,0"
+                        FontSize="15" Click="BrowseLegacyDatButton_Click"/>
+
+                <TextBlock x:Name="LegacyDatInfoTextBlock" Grid.Row="1" Grid.ColumnSpan="2"
+                           Margin="2,10,2,10"
+                           Text="選擇由舊版 BSXScript_Tool 打包的 DAT。不需要原始遊戲腳本。"
+                           FontSize="14" Foreground="#FF536273" TextWrapping="Wrap"/>
+
+                <StackPanel Grid.Row="2" Grid.ColumnSpan="2">
+                    <Button x:Name="ExportLegacyButton"
+                            Content="匯出舊版 DAT → TXT"
+                            Height="46" FontSize="16" FontWeight="SemiBold"
+                            IsEnabled="False" Click="ExportLegacyButton_Click"/>
+                    <TextBlock Text="輸出僅供人工比對，包含角色名稱、對話／選項文字與原始索引；不會自動比對、合併或修改 DAT。"
+                               Margin="3,8,3,0" FontSize="13" Foreground="#FF536273" TextWrapping="Wrap"/>
+                </StackPanel>
             </Grid>
         </GroupBox>
 
-        <GroupBox Grid.Row="2" Header="中文化作業" Padding="12" Margin="0,0,0,12">
+        <GroupBox Grid.Row="2"
+                  Header="② 新版文字匯出／打包｜BaeSenX 原有功能"
+                  FontSize="16" FontWeight="SemiBold"
+                  Padding="14" Margin="0,0,0,14">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                    <Button x:Name="ExportButton" Content="① 匯出翻譯文字檔" Height="42"
-                            IsEnabled="False" Click="ExportButton_Click"/>
-                    <TextBlock Text="匯出角色名稱、對話與選項文字；使用 UTF-8 編碼。"
-                               Margin="2,7,2,0" Foreground="#FF536273" TextWrapping="Wrap"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                    <Button x:Name="ImportButton" Content="② 匯入翻譯並產生新腳本" Height="42"
-                            IsEnabled="False" Click="ImportButton_Click"/>
-                    <TextBlock Text="保留原始 Opcode，不覆蓋來源 bsxx.dat，另存翻譯版。"
-                               Margin="2,7,2,0" Foreground="#FF536273" TextWrapping="Wrap"/>
-                </StackPanel>
+
+                <TextBox x:Name="ScriptPathTextBox" Grid.Row="0" Grid.Column="0"
+                         Height="38" Padding="9,6" FontSize="15"
+                         VerticalContentAlignment="Center"
+                         IsReadOnly="True" Background="White"/>
+                <Button x:Name="BrowseScriptButton" Grid.Row="0" Grid.Column="1"
+                        Content="選擇新版 bsxx.dat" Width="190" Height="38" Margin="12,0,0,0"
+                        FontSize="15" Click="BrowseScriptButton_Click"/>
+
+                <TextBlock x:Name="ScriptInfoTextBlock" Grid.Row="1" Grid.ColumnSpan="2"
+                           Margin="2,10,2,10"
+                           Text="選擇未經舊版工具改寫的原始 BSXX 腳本。支援 BSXScript 3.0～3.3。"
+                           FontSize="14" Foreground="#FF536273" TextWrapping="Wrap"/>
+
+                <Grid Grid.Row="2" Grid.ColumnSpan="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <Button x:Name="ExportButton" Content="匯出新版翻譯文字檔"
+                                Height="46" FontSize="15" FontWeight="SemiBold"
+                                IsEnabled="False" Click="ExportButton_Click"/>
+                        <TextBlock Text="匯出新版 BaeSenX TXT，供人工整理翻譯。"
+                                   Margin="3,8,3,0" FontSize="13" Foreground="#FF536273" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <Button x:Name="ImportButton" Content="匯入新版 TXT 並打包 DAT"
+                                Height="46" FontSize="15" FontWeight="SemiBold"
+                                IsEnabled="False" Click="ImportButton_Click"/>
+                        <TextBlock Text="只使用新版 TXT 打包；保留 Opcode，另存新 DAT。"
+                                   Margin="3,8,3,0" FontSize="13" Foreground="#FF536273" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
             </Grid>
         </GroupBox>
 
-        <GroupBox Grid.Row="3" Header="處理紀錄" Padding="10">
+        <GroupBox Grid.Row="3" Header="處理紀錄" FontSize="16" FontWeight="SemiBold" Padding="10">
             <TextBox x:Name="LogTextBox" IsReadOnly="True" AcceptsReturn="True"
                      TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                      HorizontalScrollBarVisibility="Disabled"
                      Background="#FFFCFDFE" BorderThickness="0"
-                     FontFamily="Consolas" FontSize="12"
-                     Padding="6"/>
+                     FontFamily="Consolas" FontSize="14"
+                     Padding="8"/>
         </GroupBox>
 
         <DockPanel Grid.Row="4" Margin="0,12,0,0">
             <TextBlock Text="Windows 10 x64｜不需額外安裝第三方套件"
-                       Foreground="#FF657386" VerticalAlignment="Center"/>
+                       FontSize="13" Foreground="#FF657386" VerticalAlignment="Center"/>
             <TextBlock x:Name="StatusTextBlock" DockPanel.Dock="Right"
-                       Text="就緒" Foreground="#FF286548" FontWeight="SemiBold"
+                       Text="就緒" FontSize="14" Foreground="#FF286548" FontWeight="SemiBold"
                        VerticalAlignment="Center" HorizontalAlignment="Right"/>
         </DockPanel>
     </Grid>
