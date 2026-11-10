@@ -1,4 +1,4 @@
-<Window x:Class="BaeSenX.MainWindow"
+﻿<Window x:Class="BaeSenX.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="BaeSenX｜Bishop 腳本中文化工具"
@@ -106,7 +106,7 @@
                         <Button x:Name="ImportButton" Content="匯入新版 TXT 並打包 DAT"
                                 Height="46" FontSize="15" FontWeight="SemiBold"
                                 IsEnabled="False" Click="ImportButton_Click"/>
-                        <TextBlock Text="只使用新版 TXT 打包；保留 Opcode，另存新 DAT。"
+                        <TextBlock Text="TXT 的 ◇ 原文必須與目前選擇的 DAT 相符。若要沿用最初的 TXT，請選擇最初的原版 DAT；若要以翻譯版 DAT 繼續修改，請先從該 DAT 重新匯出 TXT。保留 Opcode，另存新 DAT。"
                                    Margin="3,8,3,0" FontSize="13" Foreground="#FF536273" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Grid>

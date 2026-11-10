@@ -69,6 +69,25 @@ internal static class Program
         Assert(exported.CharacterCount == inspected.CharacterCount, "export character count matches inspection");
         Assert(exported.MessageCount == inspected.MessageCount, "export message count matches inspection");
 
+        byte[] firstExportBytes = File.ReadAllBytes(exportedTextPath);
+        Assert(firstExportBytes.Length >= 3 && firstExportBytes[0] == 0xEF &&
+               firstExportBytes[1] == 0xBB && firstExportBytes[2] == 0xBF,
+            "exported TXT retains UTF-8 BOM");
+
+        // Re-export to the same existing target. The previous file is replaced
+        // only after the complete new TXT has been written to a temporary file.
+        File.WriteAllText(exportedTextPath, "INCOMPLETE OLD CONTENT", new UTF8Encoding(false));
+        ScriptSummary overwrittenExport = TranslationService.ExportText(sourcePath, exportedTextPath);
+        byte[] overwrittenBytes = File.ReadAllBytes(exportedTextPath);
+        Assert(overwrittenExport.CharacterCount == inspected.CharacterCount &&
+               overwrittenExport.MessageCount == inspected.MessageCount,
+            "export can safely replace an existing TXT file");
+        Assert(overwrittenBytes.Length >= 3 && overwrittenBytes[0] == 0xEF &&
+               overwrittenBytes[1] == 0xBB && overwrittenBytes[2] == 0xBF,
+            "atomically replaced TXT still has UTF-8 BOM");
+        Assert(!Encoding.UTF8.GetString(overwrittenBytes).Contains("INCOMPLETE OLD CONTENT"),
+            "atomically replaced TXT does not retain previous partial content");
+
         List<string> exportedLines = ReadUtf8Lines(exportedTextPath);
         Assert(exportedLines.Any(line => line.StartsWith("◇A", StringComparison.Ordinal)),
             "export includes original character-name records");
@@ -152,7 +171,7 @@ internal static class Program
         Assert(legacyVerifyLines.Any(line => line == legacyPrefix + legacyTranslation),
             "legacy translation is present in rebuilt BSXX file");
 
-        // Test 3: mismatched source text must be rejected before writing output.
+        // Test 3: mismatched source text must be rejected with actionable details.
         List<string> mismatchedLines = ReadUtf8Lines(exportedTextPath);
         int originalMessageLineIndex = mismatchedLines.FindIndex(
             line => line.StartsWith("◇B", StringComparison.Ordinal));
@@ -162,9 +181,17 @@ internal static class Program
         string mismatchedTextPath = Path.Combine(runDirectory, "mismatched.translation.txt");
         WriteUtf8Lines(mismatchedTextPath, mismatchedLines, emitBom: true);
         string rejectedOutputPath = Path.Combine(runDirectory, "must-not-exist.dat");
-        Expect<InvalidDataException>(() => TranslationService.ImportText(
-            sourcePath, mismatchedTextPath, rejectedOutputPath),
+        InvalidDataException mismatchException = ExpectAndReturn<InvalidDataException>(() =>
+            TranslationService.ImportText(sourcePath, mismatchedTextPath, rejectedOutputPath),
             "mismatched original text is rejected");
+        Assert(mismatchException.Message.Contains("TXT 的 ◇ 原文"),
+            "mismatch message identifies the TXT original value");
+        Assert(mismatchException.Message.Contains("DAT 目前內容"),
+            "mismatch message identifies the DAT value");
+        Assert(mismatchException.Message.Contains("最初匯出的 TXT"),
+            "mismatch message explains how to continue from the original DAT");
+        Assert(mismatchException.Message.Contains("重新匯出新版 TXT"),
+            "mismatch message explains how to continue from a translated DAT");
         Assert(!File.Exists(rejectedOutputPath), "rejected import does not create an output file");
 
         // Test 4: NUL must not be written into a UTF-16 string table.
@@ -419,6 +446,23 @@ internal static class Program
         {
             Console.WriteLine("PASS: " + description);
             return;
+        }
+
+        throw new InvalidOperationException("Assertion failed: expected " + typeof(TException).Name + " - " + description);
+    }
+
+    private static TException ExpectAndReturn<TException>(Action action, string description)
+        where TException : Exception
+    {
+        _assertionCount++;
+        try
+        {
+            action();
+        }
+        catch (TException exception)
+        {
+            Console.WriteLine("PASS: " + description);
+            return exception;
         }
 
         throw new InvalidOperationException("Assertion failed: expected " + typeof(TException).Name + " - " + description);

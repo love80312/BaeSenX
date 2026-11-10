@@ -63,6 +63,7 @@ public static class TranslationService
     private const int OpcodeSizeField = 0x30;
     private const int Alignment = 16;
     private const int MaximumStringCount = 1_000_000;
+    private const int DiagnosticValueLimit = 120;
 
     private static readonly Encoding Utf16LittleEndian = new UnicodeEncoding(
         bigEndian: false,
@@ -86,6 +87,7 @@ public static class TranslationService
     /// Exports all entries in the character-name and message tables.
     /// B = shared message table (dialogue and choice labels).
     /// The text file format remains compatible with BSXScript_Tool markers.
+    /// The output is written to a temporary file before replacing the target.
     /// </summary>
     public static ScriptSummary ExportText(string scriptPath, string outputTextPath)
     {
@@ -114,8 +116,7 @@ public static class TranslationService
         AppendTable(builder, 'A', document.CharacterNames, "角色名稱");
         AppendTable(builder, 'B', document.Messages, "對話／選項文字");
 
-        Directory.CreateDirectory(Path.GetDirectoryName(outputFullPath)!);
-        File.WriteAllText(outputFullPath, builder.ToString(), Utf8WithBom);
+        WriteAtomically(outputFullPath, EncodeUtf8WithBom(builder.ToString()));
 
         return new ScriptSummary(
             document.Version,
@@ -303,13 +304,34 @@ public static class TranslationService
             if (pair.Key < 0 || pair.Key >= actualValues.Count)
                 throw new InvalidDataException($"原文索引 {type}{pair.Key:X7} 超出目前腳本範圍。");
 
-            if (!string.Equals(pair.Value, actualValues[pair.Key], StringComparison.Ordinal))
+            string actualValue = actualValues[pair.Key];
+            if (!string.Equals(pair.Value, actualValue, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    $"原文不符合目前的 bsxx.dat：索引 {type}{pair.Key:X7}。\n" +
-                    "可能選錯遊戲腳本，或文字檔來自不同版本。為避免錯位匯入，已中止處理。");
+                    $"TXT 的原文與目前選擇的 DAT 不一致：索引 {type}{pair.Key:X7}。\n" +
+                    $"TXT 的 ◇ 原文：{FormatDiagnosticValue(pair.Value)}\n" +
+                    $"DAT 目前內容：{FormatDiagnosticValue(actualValue)}\n\n" +
+                    "若要沿用最初匯出的 TXT，請選擇當初匯出 TXT 時使用的原版 bsxx.dat。\n" +
+                    "若要以翻譯後 DAT 繼續修改，請先從該 DAT 重新匯出新版 TXT，再修改 ◆ 翻譯行。\n" +
+                    "為避免翻譯套用錯位，已中止打包。");
             }
         }
+    }
+
+    private static string FormatDiagnosticValue(string value)
+    {
+        string escaped = EscapeText(value);
+        if (escaped.Length > DiagnosticValueLimit)
+        {
+            int displayLength = DiagnosticValueLimit;
+            if (displayLength < escaped.Length && char.IsHighSurrogate(escaped[displayLength - 1]) &&
+                char.IsLowSurrogate(escaped[displayLength]))
+            {
+                displayLength--;
+            }
+            escaped = escaped.Substring(0, displayLength) + "…";
+        }
+        return "「" + escaped + "」";
     }
 
     private static void ValidateTranslationSources(
@@ -426,6 +448,16 @@ public static class TranslationService
             }
         }
         return builder.ToString();
+    }
+
+    private static byte[] EncodeUtf8WithBom(string text)
+    {
+        byte[] preamble = Utf8WithBom.GetPreamble();
+        byte[] body = Utf8WithBom.GetBytes(text);
+        byte[] result = new byte[preamble.Length + body.Length];
+        Buffer.BlockCopy(preamble, 0, result, 0, preamble.Length);
+        Buffer.BlockCopy(body, 0, result, preamble.Length, body.Length);
+        return result;
     }
 
     private static void WriteAtomically(string outputPath, byte[] data)
