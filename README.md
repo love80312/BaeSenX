@@ -1,4 +1,4 @@
-# BaeSenX — Bishop 腳本中文化工具
+# BaeSenX — Bishop 腳本中文化工具 byＡＩ
 
 BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字中文化為目標，提供 Windows 10 x64 WPF GUI。
 
