@@ -1,10 +1,8 @@
-﻿<Application x:Class="BaeSenX.App"
+<Application x:Class="BaeSenX.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:BaeSenX"
-             StartupUri="MainWindow.xaml"
-             ThemeMode="System">
+             StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
     </Application.Resources>
 </Application>

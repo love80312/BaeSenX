@@ -1,23 +1,86 @@
-# BaeSenX
+# BaeSenX — Bishop 腳本中文化工具
 
-Tool set that allows for certain procedures in BISHOP released games, using their engine called BSXX internally. At the moment is still a work in progress tool, since the inital scope of this project was to just release a script recompiler and decompiler, but considering the length of this task given the nature of the engine, a WIP tool was released to let users know of the current progress and if possible, get some PRs.
+BaeSenX 第一階段以 Bishop 視覺小說的 `BSXScript`（`bsxx.dat`）文字中文化為目標，提供 Windows 10 x64 GUI。
 
-## Functions
-### Savegame: Update its checksum
-To ensure that a savegame won't be used in a game not designed for it, BISHOP includes a 32 byte header for a checksum. During boot time, the game calculates the **MD5 checksum value of the opcode region of the loaded bsxx.dat file**, and then compares it with the value given at the savegame. If both values do not coincide, the game automatically removes the save as it deems it not compatible.
+## 第一版功能
 
-#### ❔ What's the point of this feature?
-ℹ️ At this moment, not much, since there is not a single script recompiler for BISHOP games in existence. This was merely created to avoid having to replay the entire game to test any script changes.
+- 辨識 `BSXScript 3.0`、`3.1`、`3.2`、`3.3`。
+- 讀取完整角色名稱字串表及訊息字串表。
+- 匯出 UTF-8（含 BOM）翻譯文字檔。
+- 匯出訊息表全部項目，包含一般對話及選項標籤，不只匯出 Opcode 目前能辨識的對話。
+- 匯入繁體中文或其他語言翻譯，重建 UTF-16LE 字串區、索引表及標頭位址／大小欄位。
+- 可讀取本工具格式，也可讀取 `BSXScript_Tool` 的 `◆A...◆`／`◆B...◆` 標記檔。
+- 匯入前核對原文及索引，避免把翻譯套用到不同版本的腳本。
+- 匯入後重新讀取輸出檔，逐筆驗證字串，並確認 Opcode 區段與原始檔逐位元組相同。
+- 輸出為另一個檔案，不會覆蓋原始 `bsxx.dat`。
+- 不需要第三方執行環境或其他 NuGet 套件；建置時會還原 .NET Framework 4.8 參考組件。
 
-#### ❔ Is this not compatible with anything?
-ℹ️ This is compatible from all games starting from version 3.0 up to 3.3, the currently known latest version of their script. Granted this system is not inherently based on how their scripts work, but this is a system that they have not touched since decades ago.
+## 使用方式
 
-### Script: Decompile
-To make the script editable, a complete decompilation is necessary. As it stands, one can extract the entire game script onto a JSON format, with each opcode separated. The problem comes from filling each opcode with the accurate metadata obtained from the rest of the script, and worse, most of the opcodes are still not understood.
-Keep in mind that their script pretty much deals with really low-level stuff, so even while having a complete decompilation, making any complex edits would prove to be difficult.
+1. 執行 `BaeSenX.exe`。
+2. 按「選擇 bsxx.dat」，選取遊戲中的腳本檔。
+3. 按「匯出翻譯文字檔」，產生 UTF-8 `.txt` 檔。
+4. 使用 Notepad++ 等文字編輯器開啟翻譯檔。
+5. 只修改每筆資料中以 `◆` 開頭的翻譯行；以 `◇` 開頭的是原文，必須保留。
+6. 保留索引標記，例如 `◆B0000123◆`，只修改標記後面的文字。
+7. 儲存文字檔後，回到 BaeSenX 按「匯入翻譯並產生新腳本」。
+8. 選取翻譯文字檔，並將結果另存為新的 `.dat` 檔。
+9. 備份遊戲原始檔後，再將新檔放入遊戲副本測試。不要直接覆蓋唯一的原始檔。
 
-#### ❔ Is this not compatible with anything?
-ℹ️ The byte length of all opcodes seems to stay the same from version 3.0 to 3.3. The problem comes with the metadata inside each instruction, which obviously there are some discrepancies between each version. Currently the game used to study the game engine is [Kutsujoku](https://vndb.org/v21769), which uses version 3.2.
+## 翻譯文字格式
 
-#### ❔ How is the game file structured?
-ℹ️ The game is divided into 3 sections: Magic signature, the opcodes and sizes for each of its lists, and each list itself.
+```text
+# BaeSenX Translation Text v1
+# A = Character names
+# B = Message table (dialogue and choice labels)
+
+◇A0000000◇原始角色名稱
+◆A0000000◆翻譯後角色名稱
+
+◇B0000000◇原始對話
+◆B0000000◆翻譯後對話
+```
+
+- `A` 是角色名稱表索引。
+- `B` 是訊息表索引，包含一般對話及選項標籤。
+- 索引是十六進位格式；必須保留 `◆`、`◇` 及索引內容。
+- `◇` 原文行用於確認翻譯檔與目前 `bsxx.dat` 相符，請勿翻譯或刪除。
+- `◆` 翻譯行會寫入遊戲。未修改的翻譯行會保留原文；刪除整筆 `◆` 行則表示該索引不匯入。
+- 將 `◆` 標記後的內容清空，代表寫入空字串。
+- 本工具格式使用 `\n`、`\r`、`\t`、`\\`、`\uXXXX` 表示換行、定位字元、反斜線及控制字元。
+- 可匯入 `BSXScript_Tool` 的標記格式；其舊格式沒有跳脫序列，因此反斜線會按原樣處理。
+
+## 安全與相容性
+
+- 本版本只修改角色名稱及訊息字串表，不修改 Opcode、函式表、變數表或指令參數。
+- 重建時保留原有 Opcode 區段，並在輸出前逐位元組比對。
+- 重建後會重新開啟輸出檔，確認版本、字串索引及全部字串均可正確讀取。
+- 原始 `bsxx.dat` 不會被覆蓋。
+- 字串以 UTF-16LE 寫入；遊戲能否正確顯示繁體中文字，仍取決於遊戲字型及字形資源是否包含所需字元。
+- 若某款遊戲的區塊排列不同、欄位不合理或檔案損毀，本工具會中止處理，不會猜測或自動修復。
+- 雖然格式標頭辨識 3.0～3.3，但尚未對所有 Bishop 遊戲逐款完成實機相容性測試。請先用遊戲副本驗證。
+
+## Windows x64 建置
+
+- GUI：WPF。
+- 目標執行階段：.NET Framework 4.8。
+- 目標架構：x64。
+- Windows 10 22H2 通常已包含 .NET Framework 4.8；若系統元件遭移除或停用，需先透過 Windows 功能修復／啟用。
+
+GitHub Actions 會在 Windows 建置環境產生 `BaeSenX-Win10-x64` Artifact：
+
+1. 開啟 GitHub 專案的 **Actions**。
+2. 選擇 **Build BaeSenX Windows x64**。
+3. 按 **Run workflow**，或由更新 `main` 分支的提交自動觸發。
+4. 成功後下載 `BaeSenX-Win10-x64` Artifact。
+5. 解壓縮並執行 `BaeSenX.exe`。
+
+## 目前不包含
+
+- Opcode 指令修改及重新編譯。
+- 片頭影片跳過、場景跳轉及遊戲流程修改。
+- BSA 封包解包／重新打包。
+- 字型、圖片、音訊及遊戲 UI 資源修改。
+- 存檔校驗碼更新 GUI。
+
+原有 `BSXScript.cs`、`DecompilerHelper.cs` 等 Opcode 研究程式碼會保留在儲存庫，但第一版文字中文化 GUI 不會編譯或呼叫未完成的 Opcode 解析器，以免影響穩定性。
