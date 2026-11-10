@@ -7,6 +7,8 @@ on:
       - t_wpf
     paths:
       - 'BaeSenX/**'
+      - 'BaeSenX.Tests/**'
+      - 'test/**'
       - '.github/workflows/build-win-x64.yml'
       - 'README.md'
 
@@ -14,14 +16,14 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-test:
     runs-on: windows-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Build .NET Framework 4.8 WPF x64
         shell: pwsh
@@ -29,8 +31,26 @@ jobs:
           New-Item -ItemType Directory -Force -Path publish | Out-Null
           msbuild BaeSenX/BaeSenX.csproj /restore /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$PWD\publish\"
 
+      - name: Build regression test runner
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test-publish | Out-Null
+          msbuild BaeSenX.Tests/BaeSenX.Tests.csproj /restore /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$PWD\test-publish\"
+
+      - name: Test real BSXX sample
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'test/bsxx.dat')) {
+            throw 'Required regression sample test/bsxx.dat was not found.'
+          }
+          New-Item -ItemType Directory -Force -Path test-results | Out-Null
+          & "$PWD\test-publish\BaeSenX.Tests.exe" "$PWD\test\bsxx.dat" "$PWD\test-results"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
       - name: Upload Windows x64 build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: BaeSenX-Win10-x64
           path: publish/**
